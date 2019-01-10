@@ -70,6 +70,10 @@ protected:
 
   // joint commands
   std::vector<double> vel_cmd;
+
+  // helper functions
+  void updateVelocity(char* req);
+  char* fillPkt(double motor_1, double motor_2, double motor_3, double motor_4, bool kick, bool dribble);
 };
 }
 #endif /* !PLAYER_HW_INTERFACE_H */

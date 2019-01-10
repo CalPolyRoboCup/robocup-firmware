@@ -8,6 +8,8 @@
 #include <robocup_control/player_hw_interface.h>
 #include <robocup_control/Insn.h>
 #include <robocup_control/Data.h>
+#include <wiringPi.h>
+
 namespace robocup_control
 {
 PlayerHWInterface::PlayerHWInterface(ros::NodeHandle nh)
@@ -54,49 +56,92 @@ bool PlayerHWInterface::init()
   motor_2 = jnt_vel_interface.getHandle(joint_names[1]);
   motor_3 = jnt_vel_interface.getHandle(joint_names[2]);
   motor_4 = jnt_vel_interface.getHandle(joint_names[3]);
+
+  if(wiringPiSPISetup(0, 100000) < 0 )
+  {
+    ROS_ERROR();
+    //die
+  }
   return true;
 }
 
 void PlayerHWInterface::read()
 {
-  robocup_control::Data plz;
-  plz.request.plz = true;
-  if (data_client.call(plz))
+  char req[12];
+  if ( wiringPiSPIDataRW(0, req, 12) < 0 )
   {
-    // ROS_INFO("Receiving data");
-    // ROS_INFO("Motor 1: %f, Motor 2: %f, Motor 3: %f, Motor 4: %f", vel[0], vel[1], vel[2], vel[3]);
-    vel[0] = plz.response.encoder1;
-    vel[1] = plz.response.encoder2;
-    vel[2] = plz.response.encoder3;
-    vel[3] = plz.response.encoder4;
-    return;
+    ROS_ERROR();
   }
-  else
-  {
-    ROS_ERROR("Error communicating with robot\n");
-  }
+  updateVelocity(req);
 }
 
 void PlayerHWInterface::write()
 {
-  robocup_control::Insn insn;
-  insn.request.motor1 = motor_1.getCommand();
-  insn.request.motor2 = motor_2.getCommand();
-  insn.request.motor3 = motor_3.getCommand();
-  insn.request.motor4 = motor_4.getCommand();
-  insn.request.kick = true;
-  insn.request.dribble = true;
-  insn.request.robot = 0;  // figure out numbering scheme later
-  // ROS_INFO("Command 1: %u, Command 2: %u, Command 3: %u, Command 4: %u",
-  // insn.request.motor1, insn.request.motor2, insn.request.motor3, insn.request.motor4);
-  if (cmd_client.call(insn))
+  char pkt = fillPkt(motor_1.getCommand(), motor_2.getCommand(), motor3.getCommand(), motor_4.getCommand(), true, true);
+  if ( wiringPiSPIDataRW(0, pkt, 12) < 0 )
   {
-    // ROS_INFO("Sending commands");
-    return;
-  }
-  else
-  {
-    ROS_ERROR("Error communicating with robot\n");
+    ROS_ERROR();
   }
 }
+
+void PlayerHWInterface::updateVelocity(char* req)
+{
+  bool sign_motors[4];
+  uint16_t motor_speeds[4];
+  sign_motors[0] = req[2] & 0x80;
+  motor_speeds[0] = (req[2] << 4) & 0x7F;
+  motor_speeds[0] &= req[3];
+
+  sign_motors[1] = req[4] & 0x80;
+  motor_speeds[1] = (req[4] << 4) & 0x7F;
+  motor_speeds[1] &= req[5];
+
+  sign_motors[2] = req[6] & 0x80;
+  motor_speeds[2] = (req[6] << 4) & 0x7F;
+  motor_speeds[2] &= req[7];
+
+  sign_motors[3] = req[8] & 0x80;
+  motor_speeds[3] = (req[8] << 4) & 0x7F;
+  motor_speeds[3] &= req[9];
+
+  // update velocities
+  for (int i = 0; i < 4; i++)
+  {
+    if (sign_motors[i])
+    {
+      vel[i] = (double) motor_speeds[i];
+    }
+    else
+    {
+      vel[i] = (double) motor_speeds[i];
+      vel[i] *= -1;
+    }
+  }
+}
+
+char* fillPkt(double motor_1, double motor_2, double motor_3, double motor_4, bool kick, bool dribble)
+{
+  char pkt[12];
+  pkt[0] = 0x2A;
+  pkt[1] = 0xB7;
+  for (int i = 0; i < 4; i++)
+  {
+    if (motor_speed[i] < 0)
+    {
+      pkt[(i+1)*2] = 0x80;
+    }
+    pkt[(i+1)*2] = (motor_speed[i] & 0x70) >> 4;
+    pkt[(i+1) * 2 + 1] = motor_speed[i] & 0x0F;
+  }
+  if (kick)
+  {
+    pkt[10] = 1;
+  }
+  if (dribble)
+  {
+    pkt[11] = 1;
+  }
+  return pkt;
+}
+
 }
