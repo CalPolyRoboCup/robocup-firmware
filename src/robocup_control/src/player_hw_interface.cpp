@@ -6,8 +6,6 @@
  */
 
 #include <robocup_control/player_hw_interface.h>
-#include <robocup_control/Insn.h>
-#include <robocup_control/Data.h>
 #include <wiringPi.h>
 
 namespace robocup_control
